@@ -1,0 +1,9 @@
+{
+  "[shellscript]": {
+    "editor.defaultFormatter": "mkhl.shfmt",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "bashIde.shellcheckPath": "shellcheck",
+  "bashIde.enableSourceErrorDiagnostics": true
+}
