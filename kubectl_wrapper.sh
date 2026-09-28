@@ -68,15 +68,18 @@ validate_manifest() {
     fi
 }
 
-get_deployment_name() {
-    # Extrae el nombre del Deployment del manifiesto
-    kubectl apply --dry-run=client -f "$MANIFEST" -n "$NAMESPACE" -o jsonpath='{.metadata.name}' 2>/dev/null
+get_workloads() {
+    # Lista los recursos con rollout (Deployment, StatefulSet, DaemonSet) del manifiesto,
+    # uno por linea, como "deployment.apps/web". Funciona con manifiestos de varios
+    # documentos (---) y devuelve una lista vacia si no hay ninguno (solo Service, ConfigMap...).
+    kubectl apply --dry-run=client -f "$MANIFEST" -n "$NAMESPACE" -o name 2>/dev/null \
+        | grep -E '^(deployment|statefulset|daemonset)\.apps/' || true
 }
 
 wait_for_rollout() {
     local deployment="$1"
     log_info "Esperando rollout de $deployment (timeout: $TIMEOUT)..."
-    if kubectl rollout status "deployment/$deployment" -n "$NAMESPACE" --timeout="$TIMEOUT"; then
+    if kubectl rollout status "$deployment" -n "$NAMESPACE" --timeout="$TIMEOUT"; then
         log_success "Rollout completado: $deployment"
         return 0
     else
@@ -88,7 +91,7 @@ wait_for_rollout() {
 rollback_deployment() {
     local deployment="$1"
     log_warn "Ejecutando rollback de $deployment..."
-    if kubectl rollout undo "deployment/$deployment" -n "$NAMESPACE"; then
+    if kubectl rollout undo "$deployment" -n "$NAMESPACE"; then
         log_success "Rollback completado: $deployment"
         wait_for_rollout "$deployment"
     else
@@ -102,28 +105,34 @@ case "$ACTION" in
     apply)
         validate_manifest
 
-        DEPLOYMENT_NAME=$(get_deployment_name)
+        mapfile -t WORKLOADS < <(get_workloads)
         log_info "Aplicando manifiesto: $MANIFEST (namespace: $NAMESPACE)"
 
         kubectl apply -f "$MANIFEST" -n "$NAMESPACE"
 
-        if [ -n "$DEPLOYMENT_NAME" ]; then
-            if ! wait_for_rollout "$DEPLOYMENT_NAME"; then
+        if [ ${#WORKLOADS[@]} -eq 0 ]; then
+            log_info "El manifiesto no tiene Deployments, StatefulSets ni DaemonSets: no hay rollout que esperar"
+        fi
+
+        for workload in "${WORKLOADS[@]}"; do
+            if ! wait_for_rollout "$workload"; then
                 log_error "Despliegue fallido. Iniciando rollback automatico..."
-                rollback_deployment "$DEPLOYMENT_NAME"
+                rollback_deployment "$workload"
                 exit 1
             fi
-        fi
+        done
 
         log_success "Despliegue completado exitosamente"
         ;;
     rollback)
-        DEPLOYMENT_NAME=$(get_deployment_name)
-        if [ -z "$DEPLOYMENT_NAME" ]; then
-            log_error "No se pudo determinar el nombre del deployment"
+        mapfile -t WORKLOADS < <(get_workloads)
+        if [ ${#WORKLOADS[@]} -eq 0 ]; then
+            log_error "El manifiesto no contiene ningun Deployment, StatefulSet ni DaemonSet"
             exit 1
         fi
-        rollback_deployment "$DEPLOYMENT_NAME"
+        for workload in "${WORKLOADS[@]}"; do
+            rollback_deployment "$workload"
+        done
         ;;
     *)
         log_error "Accion invalida: $ACTION"

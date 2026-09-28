@@ -116,8 +116,10 @@ case "$ACTION" in
         ;;
     apply)
         log_info "Paso 4/4: Aplicando cambios (terraform apply)..."
-        # Buscar el plan mas reciente para este entorno
-        LATEST_PLAN=$(ls -t tfplan-${ENVIRONMENT}-* 2>/dev/null | head -1)
+        # Buscar el plan mas reciente para este entorno.
+        # Si no hay ninguno, ls falla y con pipefail el script terminaria aqui: || true lo evita.
+        # shellcheck disable=SC2012  # los nombres de plan los genera este script, sin espacios
+        LATEST_PLAN=$(ls -t tfplan-"${ENVIRONMENT}"-* 2>/dev/null | head -1 || true)
         if [ -n "$LATEST_PLAN" ]; then
             log_info "Usando plan existente: $LATEST_PLAN"
             if [ "$AUTO_APPROVE" = true ]; then
